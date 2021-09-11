@@ -1,174 +1,81 @@
 package main
 
 import (
-	"context"
-	"encoding/json"
 	"log"
 	"net/http"
 	"workspace/src/helper"
-	"workspace/src/models"
 
-	"github.com/gorilla/mux"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"github.com/gin-gonic/gin"
 )
 
 //Connection mongoDB with helper class
 var collection = helper.ConnectDB()
 
-func getBooks(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
+type album struct {
+	ID     string  `json:"id"`
+	Title  string  `json:"title"`
+	Artist string  `json:"artist"`
+	Price  float64 `json:"price"`
+}
 
-	// we created Book array
-	var books []models.Book
+var albums = []album{
+	{ID: "1", Title: "Blue Train", Artist: "John Coltrane", Price: 56.99},
+	{ID: "2", Title: "Jeru", Artist: "Gerry Mulligan", Price: 17.99},
+	{ID: "3", Title: "Sarah Vaughan and Clifford Brown", Artist: "Sarah Vaughan", Price: 39.99},
+}
 
-	// bson.M{},  we passed empty filter. So we want to get all data.
-	cur, err := collection.Find(context.TODO(), bson.M{})
+//get album
+func getAlbums(c *gin.Context) {
+	c.IndentedJSON(http.StatusOK, albums)
+}
 
-	if err != nil {
-		helper.GetError(err, w)
+//save data into array
+func postAlbums(c *gin.Context) {
+	var newAlbum album
+	if err := c.BindJSON(&newAlbum); err != nil {
 		return
 	}
+	albums = append(albums, newAlbum)
+	c.IndentedJSON(http.StatusCreated, newAlbum)
+}
 
-	// Close the cursor once finished
-	/*A defer statement defers the execution of a function until the surrounding function returns.
-	simply, run cur.Close() process but after cur.Next() finished.*/
-	defer cur.Close(context.TODO())
-
-	for cur.Next(context.TODO()) {
-
-		// create a value into which the single document can be decoded
-		var book models.Book
-		// & character returns the memory address of the following variable.
-		err := cur.Decode(&book) // decode similar to deserialize process.
-		if err != nil {
-			log.Fatal(err)
+//get data by id
+func getAlbumByID(c *gin.Context) {
+	id := c.Param("id")
+	for _, a := range albums {
+		if a.ID == id {
+			c.IndentedJSON(http.StatusOK, a)
+			return
 		}
-
-		// add item our array
-		books = append(books, book)
 	}
-
-	if err := cur.Err(); err != nil {
-		log.Fatal(err)
-	}
-
-	json.NewEncoder(w).Encode(books) // encode similar to serialize process.
+	c.IndentedJSON(http.StatusNotFound, gin.H{"message": "Not Found !"})
 }
 
-func getBook(w http.ResponseWriter, r *http.Request) {
-	// set header.
-	w.Header().Set("Content-Type", "application/json")
-
-	var book models.Book
-	// we get params with mux.
-	var params = mux.Vars(r)
-
-	// string to primitive.ObjectID
-	id, _ := primitive.ObjectIDFromHex(params["id"])
-
-	// We create filter. If it is unnecessary to sort data for you, you can use bson.M{}
-	filter := bson.M{"_id": id}
-	err := collection.FindOne(context.TODO(), filter).Decode(&book)
-
-	if err != nil {
-		helper.GetError(err, w)
-		return
+//delete data by id
+func deleteAlbum(c *gin.Context) {
+	id := c.Param("id")
+	for _, a := range albums {
+		if a.ID == id {
+			c.IndentedJSON(http.StatusOK, gin.H{"message": "User is Deleted !"})
+			return
+		}
 	}
-
-	json.NewEncoder(w).Encode(book)
-}
-
-func createBook(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	var book models.Book
-
-	// we decode our body request params
-	_ = json.NewDecoder(r.Body).Decode(&book)
-
-	// insert our book model.
-	result, err := collection.InsertOne(context.TODO(), book)
-
-	if err != nil {
-		helper.GetError(err, w)
-		return
-	}
-
-	json.NewEncoder(w).Encode(result)
-}
-
-func updateBook(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	var params = mux.Vars(r)
-
-	//Get id from parameters
-	id, _ := primitive.ObjectIDFromHex(params["id"])
-
-	var book models.Book
-
-	// Create filter
-	filter := bson.M{"_id": id}
-
-	// Read update model from body request
-	_ = json.NewDecoder(r.Body).Decode(&book)
-
-	// prepare update model.
-	update := bson.D{
-		{"$set", bson.D{
-			{"isbn", book.Isbn},
-			{"title", book.Title},
-			{"author", bson.D{
-				{"firstname", book.Author.FirstName},
-				{"lastname", book.Author.LastName},
-			}},
-		}},
-	}
-
-	err := collection.FindOneAndUpdate(context.TODO(), filter, update).Decode(&book)
-
-	if err != nil {
-		helper.GetError(err, w)
-		return
-	}
-
-	book.ID = id
-
-	json.NewEncoder(w).Encode(book)
-}
-
-func deleteBook(w http.ResponseWriter, r *http.Request) {
-	// Set header
-	w.Header().Set("Content-Type", "application/json")
-
-	// get params
-	var params = mux.Vars(r)
-
-	// string to primitve.ObjectID
-	id, err := primitive.ObjectIDFromHex(params["id"])
-
-	// prepare filter.
-	filter := bson.M{"_id": id}
-
-	deleteResult, err := collection.DeleteOne(context.TODO(), filter)
-
-	if err != nil {
-		helper.GetError(err, w)
-		return
-	}
-
-	json.NewEncoder(w).Encode(deleteResult)
+	c.IndentedJSON(http.StatusNotFound, gin.H{"message": "Not Found !"})
 }
 
 // var client *mongo.Client
 
 func main() {
 	//Init Router
-	r := mux.NewRouter()
-	// router := gin.Default()
+	router := gin.Default()
+	router.GET("/albums", getAlbums)
+	router.POST("/save", postAlbums)
+	router.GET("/albums/:id", getAlbumByID)
+	router.DELETE("/albums/delete/:id", deleteAlbum)
 
-	// router.GET("/api/books", getBooks)
+	// router.Run("localhost:8000")
+
+	// router.GET("/api/books", getBooks())
 	// router.GET("/api/books/{id}", getBook)
 	// router.POST("/api/books", createBook)
 	// router.PUT("/api/books/{id}", updateBook)
@@ -176,16 +83,11 @@ func main() {
 
 	// router.Run(":8000", router)
 
-	r.HandleFunc("/api/books", getBooks).Methods("GET")
-	r.HandleFunc("/api/books/{id}", getBook).Methods("GET")
-	r.HandleFunc("/api/books", createBook).Methods("POST")
-	r.HandleFunc("/api/books/{id}", updateBook).Methods("PUT")
-	r.HandleFunc("/api/books/{id}", deleteBook).Methods("DELETE")
 	// configuration.Port
 	// config := helper.GetConfiguration()
 	// log.Fatal(http.ListenAndServe(os.Getenv("PORT"), r))
 
 	// set our port address
-	log.Fatal(http.ListenAndServe(":8000", r))
+	log.Fatal(http.ListenAndServe(":8000", router))
 
 }
